@@ -347,18 +347,20 @@ class ProtocolAnalyzer(object):
             start = 1  # Starts with Pause
             total_samples = ppseq[0, 1]
 
-        for i in range(start, len(ppseq)):
+        i = start
+        while i < len(ppseq):
             cur_pulse_type = ppseq[i, 0]
             num_samples = ppseq[i, 1]
-            num_symbols_float = num_samples / samples_per_symbol
-            num_symbols = int(num_symbols_float)
-            decimal_place = num_symbols_float - num_symbols
-
-            if decimal_place > 0.5:
-                num_symbols += 1
 
             if cur_pulse_type == pause_type:
-                # OOK
+                # Handle pause
+                num_symbols_float = num_samples / samples_per_symbol
+                num_symbols = int(num_symbols_float)
+                decimal_place = num_symbols_float - num_symbols
+
+                if decimal_place > 0.5:
+                    num_symbols += 1
+
                 if num_symbols <= pause_threshold or pause_threshold == 0:
                     data_bits.extend([0] * (num_symbols * bits_per_symbol))
                     if write_bit_sample_pos:
@@ -386,7 +388,26 @@ class ProtocolAnalyzer(object):
                     data_bits[:] = array.array("B", [])
                     pauses.append(num_samples)
                     there_was_data = False
+
+                # Truncate 140 samples after a pause
+                if i + 1 < len(ppseq) and ppseq[i + 1, 0] != pause_type:
+                    next_num_samples = ppseq[i + 1, 1] - 140
+                    if next_num_samples > 0:
+                        # Adjust the next pulse length
+                        ppseq[i + 1, 1] = next_num_samples
+                    else:
+                        # Skip the next pulse if no samples remain
+                        i += 1
+
             else:
+                # Process non-pause pulses
+                num_symbols_float = num_samples / samples_per_symbol
+                num_symbols = int(num_symbols_float)
+                decimal_place = num_symbols_float - num_symbols
+
+                if decimal_place > 0.5:
+                    num_symbols += 1
+
                 data_bits.extend(
                     util.number_to_bits(cur_pulse_type, bits_per_symbol) * num_symbols
                 )
@@ -401,6 +422,7 @@ class ProtocolAnalyzer(object):
                     )
 
             total_samples += num_samples
+            i += 1
 
         if there_was_data:
             resulting_data_bits.append(data_bits[:])
