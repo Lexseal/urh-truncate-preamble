@@ -347,12 +347,17 @@ class ProtocolAnalyzer(object):
             start = 1  # Starts with Pause
             total_samples = ppseq[0, 1]
 
+        samples_to_truncate_after_pause = 140
+        samples_since_last_pause = 0
+        max_samples_since_last_pause = 304*8*5
+
         i = start
         while i < len(ppseq):
             cur_pulse_type = ppseq[i, 0]
             num_samples = ppseq[i, 1]
 
             if cur_pulse_type == pause_type:
+                samples_since_last_pause = 0
                 # Handle pause
                 num_symbols_float = num_samples / samples_per_symbol
                 num_symbols = int(num_symbols_float)
@@ -390,16 +395,20 @@ class ProtocolAnalyzer(object):
                     there_was_data = False
 
                 # Truncate 140 samples after a pause
-                if i + 1 < len(ppseq) and ppseq[i + 1, 0] != pause_type:
-                    next_num_samples = ppseq[i + 1, 1] - 140
-                    if next_num_samples > 0:
-                        # Adjust the next pulse length
-                        ppseq[i + 1, 1] = next_num_samples
-                    else:
+                remaining_samples_to_truncate = samples_to_truncate_after_pause
+                while remaining_samples_to_truncate > 0 and i + 1 < len(ppseq) and ppseq[i + 1, 0] != pause_type:
+                    next_num_samples = ppseq[i + 1, 1]
+                    if next_num_samples <= remaining_samples_to_truncate:
                         # Skip the next pulse if no samples remain
                         i += 1
+                    if next_num_samples > remaining_samples_to_truncate:
+                        # Adjust the next pulse length
+                        ppseq[i + 1, 1] -= remaining_samples_to_truncate
+                    remaining_samples_to_truncate -= next_num_samples
 
             else:
+                num_samples = min(num_samples, max_samples_since_last_pause - samples_since_last_pause)
+                samples_since_last_pause += num_samples
                 # Process non-pause pulses
                 num_symbols_float = num_samples / samples_per_symbol
                 num_symbols = int(num_symbols_float)
