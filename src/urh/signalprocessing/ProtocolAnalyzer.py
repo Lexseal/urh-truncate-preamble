@@ -348,6 +348,7 @@ class ProtocolAnalyzer(object):
             total_samples = ppseq[0, 1]
 
         samples_to_truncate_after_pause = 140
+        
         samples_since_last_pause = 0
         max_samples_since_last_pause = 304*8*5
 
@@ -383,15 +384,19 @@ class ProtocolAnalyzer(object):
                     bit_sampl_pos[:] = array.array("L", [])
 
                 else:
-                    if write_bit_sample_pos:
-                        bit_sampl_pos.append(total_samples)
-                        bit_sampl_pos.append(total_samples + num_samples)
-                        bit_sample_positions.append(bit_sampl_pos[:])
-                        bit_sampl_pos[:] = array.array("L", [])
+                    curr_data_bits = data_bits[:]
+                    
+                    if curr_data_bits not in resulting_data_bits:
+                        if write_bit_sample_pos:
+                            bit_sampl_pos.append(total_samples)
+                            bit_sampl_pos.append(total_samples + num_samples)
+                            bit_sample_positions.append(bit_sampl_pos[:])
+                            bit_sampl_pos[:] = array.array("L", [])
 
-                    resulting_data_bits.append(data_bits[:])
+                        resulting_data_bits.append(curr_data_bits)
+                        pauses.append(num_samples)
+                        
                     data_bits[:] = array.array("B", [])
-                    pauses.append(num_samples)
                     there_was_data = False
 
                 # Truncate 140 samples after a pause
@@ -434,13 +439,18 @@ class ProtocolAnalyzer(object):
             i += 1
 
         if there_was_data:
-            resulting_data_bits.append(data_bits[:])
-            if write_bit_sample_pos:
-                bit_sample_positions.append(
-                    bit_sampl_pos[:] + array.array("L", [total_samples])
-                )
-            pause = ppseq[-1, 1] if ppseq[-1, 0] == pause_type else 0
-            pauses.append(pause)
+            last_data_bits = data_bits[:]
+            
+            if last_data_bits not in resulting_data_bits:
+                resulting_data_bits.append(data_bits[:])
+                if write_bit_sample_pos:
+                    bit_sample_positions.append(
+                        bit_sampl_pos[:] + array.array("L", [total_samples])
+                    )
+                pause = ppseq[-1, 1] if ppseq[-1, 0] == pause_type else 0
+                pauses.append(pause)
+            
+        print("resulting data bits", len(resulting_data_bits))
 
         return resulting_data_bits, pauses, bit_sample_positions
 
