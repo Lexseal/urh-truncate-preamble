@@ -343,11 +343,16 @@ class ProtocolAnalyzer(object):
 
         samples_per_bit = int(samples_per_symbol / bits_per_symbol)
 
+        # forcibly insert a pause at the beginning of the sequence
+        ppseq = np.insert(ppseq, 0, [pause_type, 0], axis=0)
+
         if len(ppseq) > 0 and ppseq[0, 0] == pause_type:
             start = 1  # Starts with Pause
             total_samples = ppseq[0, 1]
 
-        samples_to_truncate_after_pause = 140
+        # get the name of the file here
+        file_name = self.signal.filename
+        samples_to_truncate_after_pause = 140 if "Left" in file_name else 135
         
         samples_since_last_pause = 0
         max_samples_since_last_pause = 304*8*5
