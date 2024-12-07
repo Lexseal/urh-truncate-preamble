@@ -888,6 +888,7 @@ class SignalFrame(QFrame):
         if (
             self.ui.cbSignalView.currentIndex() == 0
             or self.ui.cbSignalView.currentIndex() == 3
+            or self.ui.cbSignalView.currentIndex() == 4
         ):
             # Draw Noise only in analog and I/Q view
             self.ui.gvSignal.scene().draw_noise_area(minimum, maximum - minimum)
@@ -973,6 +974,10 @@ class SignalFrame(QFrame):
             self.__set_samples_in_view()
             self.__set_duration()
 
+        if self.ui.cbSignalView.currentIndex() == 4:
+            print('emitting protocol needs update')
+            self.signal.protocol_needs_update.emit()
+
         self.unsetCursor()
 
     @pyqtSlot()
@@ -1033,6 +1038,7 @@ class SignalFrame(QFrame):
 
     @pyqtSlot()
     def refresh_protocol(self):
+        print(self.ui.cbSignalView.currentIndex())
         self.show_protocol(refresh=True)
 
     @pyqtSlot(int)
