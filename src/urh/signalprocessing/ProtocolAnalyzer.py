@@ -454,8 +454,23 @@ class ProtocolAnalyzer(object):
                     )
                 pause = ppseq[-1, 1] if ppseq[-1, 0] == pause_type else 0
                 pauses.append(pause)
-            
-        print("resulting data bits", len(resulting_data_bits))
+
+        new_resulting_data_bits = []
+        beg_part_up_until = 33
+        
+        for i in range(1, len(resulting_data_bits)): 
+            for j in range(0, i): 
+                data_bits_i: array.array = resulting_data_bits[i][:]
+                data_bits_j: array.array = resulting_data_bits[j][:]
+                
+                new_packet1 = data_bits_i[:beg_part_up_until].extend(data_bits_j[beg_part_up_until:])
+                new_packet2 = data_bits_j[:beg_part_up_until].extend(data_bits_i[beg_part_up_until:])
+                
+                if new_packet1 not in new_resulting_data_bits:
+                    new_resulting_data_bits.append(new_packet1)
+                    
+                if new_packet2 not in new_resulting_data_bits:
+                    new_resulting_data_bits.append(new_packet2)
 
         return resulting_data_bits, pauses, bit_sample_positions
 
