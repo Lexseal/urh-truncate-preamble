@@ -563,10 +563,6 @@ class ProtocolAnalyzer(object):
                         recomb_pauses.append(num_pause_samples) # this num_samples is the number of PAUSE samples
                         
                         recomb_total_samples += num_pause_samples
-                    
-                        
-            if recomb_sample_positions:
-                recomb_sample_positions[-1].pop()
                         
             fixed_recomb_sample_positions = []
                 
