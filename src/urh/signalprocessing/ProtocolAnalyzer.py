@@ -19,6 +19,8 @@ from urh.signalprocessing.Signal import Signal
 from urh.util import util as urh_util, util
 from urh.util.Logger import logger
 
+import copy
+
 
 class ProtocolAnalyzerSignals(QObject):
     protocol_updated = pyqtSignal()
@@ -224,7 +226,7 @@ class ProtocolAnalyzer(object):
         for message in messages:
             message.decoder = decoder
 
-    def get_protocol_from_signal(self):
+    def get_protocol_from_signal(self, recombination=False):
         signal = self.signal
         if signal is None:
             self.messages = None
@@ -252,6 +254,7 @@ class ProtocolAnalyzer(object):
             samples_per_symbol,
             self.signal.bits_per_symbol,
             pause_threshold=signal.pause_threshold,
+            recombination=recombination
         )
         if signal.message_length_divisor > 1 and signal.modulation_type == "ASK":
             self.__ensure_message_length_multiple(
@@ -320,6 +323,27 @@ class ProtocolAnalyzer(object):
                 )
                 bit_sample_pos[i].append(bit_sample_pos[i][-1] + pauses[i])
 
+    
+    def domino_decrement(self, arr):
+        """
+        Go through and subtract each lists 2nd item with its previous lists second item
+        Ignore the last two elements.
+
+        Args:
+            arr (list): list of items
+
+        Returns:
+            list: new list with decrements
+        """
+        arr_copy = copy.deepcopy(arr)
+                                
+        for i in range(1, len(arr) - 2):
+            current_value = arr_copy[i][1]
+            previous_value = arr_copy[i - 1][1]
+            arr_copy[i][1] = current_value - previous_value
+            
+        return arr_copy
+
     def _ppseq_to_bits(
         self,
         ppseq,
@@ -327,8 +351,9 @@ class ProtocolAnalyzer(object):
         bits_per_symbol: int,
         write_bit_sample_pos=True,
         pause_threshold=8,
+        recombination=False
     ):
-        bit_sampl_pos = array.array("L", [])
+        bit_sampl_pos = []
         bit_sample_positions = []
 
         data_bits = array.array("B", [])
@@ -346,17 +371,26 @@ class ProtocolAnalyzer(object):
         # forcibly insert a pause at the beginning of the sequence
         ppseq = np.insert(ppseq, 0, [pause_type, 0], axis=0)
 
+        # following four variables are for recombination only
+        recomb_resulting_data_bits = []
+        recomb_pauses = []
+        recomb_sampl_pos = []
+        recomb_sample_positions = []
+        data_bits_up_until = 33
+        recomb_total_samples = 0
+        
         if len(ppseq) > 0 and ppseq[0, 0] == pause_type:
             start = 1  # Starts with Pause
             total_samples = ppseq[0, 1]
+            recomb_total_samples = ppseq[0, 1]
 
         # get the name of the file here
-        file_name = self.signal.filename
-        samples_to_truncate_after_pause = 140 if "Left" in file_name else 135
+        file_name: str = self.signal.filename
+        samples_to_truncate_after_pause = 140 if "left" in file_name.lower() else 135
         
         samples_since_last_pause = 0
         max_samples_since_last_pause = 304*8*5
-
+        
         i = start
         while i < len(ppseq):
             cur_pulse_type = ppseq[i, 0]
@@ -364,6 +398,7 @@ class ProtocolAnalyzer(object):
 
             if cur_pulse_type == pause_type:
                 samples_since_last_pause = 0
+                
                 # Handle pause
                 num_symbols_float = num_samples / samples_per_symbol
                 num_symbols = int(num_symbols_float)
@@ -374,10 +409,18 @@ class ProtocolAnalyzer(object):
 
                 if num_symbols <= pause_threshold or pause_threshold == 0:
                     data_bits.extend([0] * (num_symbols * bits_per_symbol))
+                    
                     if write_bit_sample_pos:
                         bit_sampl_pos.extend(
                             [
-                                total_samples + k * samples_per_bit
+                                [k * samples_per_bit, total_samples]
+                                for k in range(num_symbols * bits_per_symbol)
+                            ]
+                        )
+                        
+                        recomb_sampl_pos.extend(
+                            [
+                                [k * samples_per_bit, total_samples]
                                 for k in range(num_symbols * bits_per_symbol)
                             ]
                         )
@@ -386,17 +429,89 @@ class ProtocolAnalyzer(object):
                     # Ignore this pause, if there were no information
                     # transmitted previously
                     data_bits[:] = array.array("B", [])
-                    bit_sampl_pos[:] = array.array("L", [])
+                    bit_sampl_pos = []
+                    recomb_sampl_pos = []
 
                 else:
                     curr_data_bits = data_bits[:]
                     
                     if curr_data_bits not in resulting_data_bits:
+                        
+                        if len(resulting_data_bits) > 1:
+                            
+                            for j in range(0, len(resulting_data_bits)): 
+                                data_bits_i: array.array = curr_data_bits[:]
+                                data_bits_j: array.array = resulting_data_bits[j][:]
+                                
+                                new_packet1 = data_bits_i[:data_bits_up_until]
+                                new_packet2 = data_bits_j[:data_bits_up_until]
+                                
+                                new_packet1.extend(data_bits_j[data_bits_up_until:])
+                                new_packet2.extend(data_bits_i[data_bits_up_until:])
+                                
+                                bit_sampl_pos_j = self.domino_decrement(bit_sample_positions[j])
+                                    
+                                # set first one back to 0
+                                bit_sampl_pos_j[0][1] = 0
+                                
+                                if new_packet1 not in recomb_resulting_data_bits:
+                                    recomb_total_samples += (len(new_packet1)  / bits_per_symbol) * samples_per_symbol
+                                    
+                                    recomb_sampl_pos_copy = copy.deepcopy(recomb_sampl_pos)
+                                    
+                                    if write_bit_sample_pos:
+                                        bit_sampl_pos_j_copy: list = copy.deepcopy(bit_sampl_pos_j)
+                                        
+                                        for i in range(len(bit_sampl_pos_j_copy)):
+                                            bit_sampl_pos_j_copy[i][1] += recomb_total_samples
+                                        
+                                        # then swap first part of pos with existing one
+                                        recomb_sampl_pos_copy = recomb_sampl_pos_copy[:data_bits_up_until]
+                                        recomb_sampl_pos_copy.extend(bit_sampl_pos_j_copy[data_bits_up_until:])
+                                        
+                                        recomb_sampl_pos_copy[-2] = [recomb_total_samples, recomb_total_samples]
+                                        recomb_sampl_pos_copy[-1] = [recomb_total_samples + num_samples, recomb_total_samples + num_samples]
+                                        
+                                        recomb_sample_positions.append(recomb_sampl_pos_copy)
+                                        
+                                    recomb_resulting_data_bits.append(new_packet1)
+                                    recomb_pauses.append(num_samples) # this num_samples is the number of PAUSE samples
+                                    
+                                    recomb_total_samples += num_samples
+                                    
+                                if new_packet2 not in recomb_resulting_data_bits:
+                                    recomb_total_samples += (len(new_packet2)  / bits_per_symbol) * samples_per_symbol
+                                    
+                                    recomb_sampl_pos_copy = copy.deepcopy(recomb_sampl_pos)
+                                    
+                                    if write_bit_sample_pos:
+                                        recomb_sampl_pos_copy.append([recomb_total_samples, recomb_total_samples])
+                                        recomb_sampl_pos_copy.append([recomb_total_samples + num_samples, recomb_total_samples + num_samples])
+                                        
+                                        bit_sampl_pos_j_copy: list = copy.deepcopy(bit_sampl_pos_j)
+                                        
+                                        for i in range(len(bit_sampl_pos_j_copy)):
+                                            bit_sampl_pos_j_copy[i][1] += recomb_total_samples
+                                        
+                                        # then swap first part of pos with existing one
+                                        recomb_sampl_pos_copy = bit_sampl_pos_j_copy[:data_bits_up_until]
+                                        recomb_sampl_pos_copy.extend(recomb_sampl_pos_copy[data_bits_up_until:])
+                                        
+                                        recomb_sample_positions.append(recomb_sampl_pos_copy)
+                                        
+                                    recomb_resulting_data_bits.append(new_packet1)
+                                    recomb_pauses.append(num_samples) # this num_samples is the number of PAUSE samples
+                                    
+                                    recomb_total_samples += num_samples
+                        
                         if write_bit_sample_pos:
-                            bit_sampl_pos.append(total_samples)
-                            bit_sampl_pos.append(total_samples + num_samples)
-                            bit_sample_positions.append(bit_sampl_pos[:])
-                            bit_sampl_pos[:] = array.array("L", [])
+                            bit_sampl_pos.append([total_samples, total_samples])
+                            bit_sampl_pos.append([total_samples + num_samples, total_samples + num_samples])
+                            
+                            bit_sample_positions.append(copy.deepcopy(bit_sampl_pos))
+                            
+                            bit_sampl_pos = []
+                            recomb_sampl_pos = []
 
                         resulting_data_bits.append(curr_data_bits)
                         pauses.append(num_samples)
@@ -406,6 +521,7 @@ class ProtocolAnalyzer(object):
 
                 # Truncate 140 samples after a pause
                 remaining_samples_to_truncate = samples_to_truncate_after_pause
+                
                 while remaining_samples_to_truncate > 0 and i + 1 < len(ppseq) and ppseq[i + 1, 0] != pause_type:
                     next_num_samples = ppseq[i + 1, 1]
                     if next_num_samples <= remaining_samples_to_truncate:
@@ -414,11 +530,13 @@ class ProtocolAnalyzer(object):
                     if next_num_samples > remaining_samples_to_truncate:
                         # Adjust the next pulse length
                         ppseq[i + 1, 1] -= remaining_samples_to_truncate
+                        
                     remaining_samples_to_truncate -= next_num_samples
 
             else:
                 num_samples = min(num_samples, max_samples_since_last_pause - samples_since_last_pause)
                 samples_since_last_pause += num_samples
+                
                 # Process non-pause pulses
                 num_symbols_float = num_samples / samples_per_symbol
                 num_symbols = int(num_symbols_float)
@@ -430,48 +548,129 @@ class ProtocolAnalyzer(object):
                 data_bits.extend(
                     util.number_to_bits(cur_pulse_type, bits_per_symbol) * num_symbols
                 )
+                
                 if not there_was_data and num_symbols > 0:
                     there_was_data = True
+                    
                 if write_bit_sample_pos:
                     bit_sampl_pos.extend(
                         [
-                            total_samples + k * samples_per_bit
+                            [k * samples_per_bit, total_samples]
                             for k in range(num_symbols * bits_per_symbol)
                         ]
                     )
-
+                    
+                    recomb_sampl_pos.extend(
+                        [
+                            [k * samples_per_bit, total_samples]
+                            for k in range(num_symbols * bits_per_symbol)
+                        ]
+                    )
+                    
             total_samples += num_samples
             i += 1
 
         if there_was_data:
             last_data_bits = data_bits[:]
+            num_samples = 1000 # this num_samples is the number of PAUSE samples, just set to 1000
             
             if last_data_bits not in resulting_data_bits:
-                resulting_data_bits.append(data_bits[:])
+                pause = ppseq[-1, 1] if ppseq[-1, 0] == pause_type else 0
+                
+                for j in range(0, len(resulting_data_bits)): 
+                    data_bits_i: array.array = curr_data_bits[:]
+                    data_bits_j: array.array = resulting_data_bits[j][:]
+                    
+                    new_packet1 = data_bits_i[:data_bits_up_until]
+                    new_packet1.extend(data_bits_j[data_bits_up_until:])
+                    
+                    new_packet2 = data_bits_j[:data_bits_up_until]
+                    new_packet2.extend(data_bits_i[data_bits_up_until:])
+                    
+                    bit_sampl_pos_j = self.domino_decrement(bit_sample_positions[j])
+                    
+                    added_first = False
+                    added_second = False
+                    
+                    if new_packet1 not in recomb_resulting_data_bits:
+                        added_first = True
+                        
+                        
+                        recomb_total_samples += (len(new_packet1)  / bits_per_symbol) * samples_per_symbol
+                                    
+                        recomb_sampl_pos_copy = copy.deepcopy(recomb_sampl_pos)
+                        
+                        if write_bit_sample_pos:
+                            bit_sampl_pos_j_copy: list = copy.deepcopy(bit_sampl_pos_j)
+                            
+                            for i in range(len(bit_sampl_pos_j_copy)):
+                                bit_sampl_pos_j_copy[i][1] += recomb_total_samples
+                            
+                            # then swap first part of pos with existing one
+                            recomb_sampl_pos_copy = recomb_sampl_pos_copy[:data_bits_up_until]
+                            recomb_sampl_pos_copy.extend(bit_sampl_pos_j_copy[data_bits_up_until:])
+                            
+                            recomb_sampl_pos_copy[-2] = [recomb_total_samples, recomb_total_samples]
+                            recomb_sampl_pos_copy[-1] = [recomb_total_samples + num_samples, recomb_total_samples + num_samples]
+                            
+                            recomb_sample_positions.append(recomb_sampl_pos_copy)
+                            
+                        recomb_resulting_data_bits.append(new_packet1)
+                        recomb_pauses.append(num_samples) 
+                        
+                    if added_first:
+                        recomb_total_samples += num_samples
+                        
+                    if new_packet2 not in recomb_resulting_data_bits:
+                        added_second = True
+                        
+                        recomb_total_samples += (len(new_packet2)  / bits_per_symbol) * samples_per_symbol
+                        
+                        recomb_sampl_pos_copy = copy.deepcopy(recomb_sampl_pos)
+                        
+                        if write_bit_sample_pos:
+                            bit_sampl_pos_j_copy: list = copy.deepcopy(bit_sampl_pos_j)
+                            
+                            for i in range(len(bit_sampl_pos_j_copy)):
+                                bit_sampl_pos_j_copy[i][1] += recomb_total_samples
+                                        
+                            recomb_sampl_pos_copy: list = bit_sampl_pos_j_copy[:data_bits_up_until]
+                            recomb_sampl_pos_copy.extend(recomb_sampl_pos_copy[data_bits_up_until:])
+                            
+                            recomb_sampl_pos_copy.append([recomb_total_samples, recomb_total_samples])
+                            
+                            recomb_sample_positions.append(recomb_sampl_pos_copy)
+                            
+                        recomb_resulting_data_bits.append(new_packet2)
+                        recomb_pauses.append(pause) 
+                        
+                    if not added_second and added_first:
+                        recomb_sample_positions[-1].pop()
+                        recomb_pauses[-1] = pause
+                        
                 if write_bit_sample_pos:
                     bit_sample_positions.append(
-                        bit_sampl_pos[:] + array.array("L", [total_samples])
+                        [*bit_sampl_pos, [total_samples, total_samples]]
                     )
-                pause = ppseq[-1, 1] if ppseq[-1, 0] == pause_type else 0
+                
+                resulting_data_bits.append(data_bits[:])
+                
                 pauses.append(pause)
-
-        new_resulting_data_bits = []
-        beg_part_up_until = 33
+                
+        bit_sample_positions = [
+            [outer_list[i][0] + outer_list[i][1] if i < len(outer_list)-2 else outer_list[i][0] for i in range(len(outer_list))]
+            for outer_list in bit_sample_positions
+        ]
         
-        for i in range(1, len(resulting_data_bits)): 
-            for j in range(0, i): 
-                data_bits_i: array.array = resulting_data_bits[i][:]
-                data_bits_j: array.array = resulting_data_bits[j][:]
-                
-                new_packet1 = data_bits_i[:beg_part_up_until].extend(data_bits_j[beg_part_up_until:])
-                new_packet2 = data_bits_j[:beg_part_up_until].extend(data_bits_i[beg_part_up_until:])
-                
-                if new_packet1 not in new_resulting_data_bits:
-                    new_resulting_data_bits.append(new_packet1)
-                    
-                if new_packet2 not in new_resulting_data_bits:
-                    new_resulting_data_bits.append(new_packet2)
-
+        recomb_sample_positions = [
+            [outer_list[i][0] + outer_list[i][1] if i < len(outer_list)-2 else outer_list[i][0] for i in range(len(outer_list))]
+            for outer_list in bit_sample_positions
+        ]
+        
+        print(resulting_data_bits)
+        print(pauses)
+        print(bit_sample_positions)
+        
         return resulting_data_bits, pauses, bit_sample_positions
 
     def get_samplepos_of_bitseq(
