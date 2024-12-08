@@ -671,6 +671,9 @@ class ProtocolAnalyzer(object):
         print(pauses)
         print(bit_sample_positions)
         
+        if recombination:
+            return recomb_resulting_data_bits, recomb_pauses, recomb_sample_positions
+        
         return resulting_data_bits, pauses, bit_sample_positions
 
     def get_samplepos_of_bitseq(
