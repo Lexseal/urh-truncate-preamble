@@ -477,7 +477,6 @@ class ProtocolAnalyzer(object):
             i += 1
 
         if there_was_data:
-            print('THERE WAS DATA!')
             last_data_bits = data_bits[:]
 
             if last_data_bits not in resulting_data_bits:
@@ -496,8 +495,6 @@ class ProtocolAnalyzer(object):
         if recombination:
             print('RECOMB TIME BABY')
             
-            print('resulting data bits len', len(resulting_data_bits))
-            
             # following four variables are for recombination only
             recomb_resulting_data_bits = []
             recomb_pauses = []
@@ -511,8 +508,6 @@ class ProtocolAnalyzer(object):
             
             for i in range(1, len(resulting_data_bits)-ignore_last): # ignore last item in resulting_data_bits cuz its an edge case
                 for j in range(0, i): 
-                    print(i, j)
-                    
                     data_bits_i: array.array = resulting_data_bits[i][:]
                     data_bits_j: array.array = resulting_data_bits[j][:]
                     
@@ -544,6 +539,7 @@ class ProtocolAnalyzer(object):
                         recomb_pauses.append(num_pause_samples) # this num_samples is the number of PAUSE samples
                         
                         recomb_total_samples += num_pause_samples
+                    
                         
                     if new_packet2 not in recomb_resulting_data_bits:
                         recomb_total_samples += (len(new_packet2)  / bits_per_symbol) * samples_per_symbol
@@ -567,6 +563,7 @@ class ProtocolAnalyzer(object):
                         recomb_pauses.append(num_pause_samples) # this num_samples is the number of PAUSE samples
                         
                         recomb_total_samples += num_pause_samples
+                    
                         
             if recomb_sample_positions:
                 recomb_sample_positions[-1].pop()
@@ -583,8 +580,6 @@ class ProtocolAnalyzer(object):
                 
                 fixed_recomb_sample_positions.append([outer_list[i][0] + outer_list[i][1] if i < len(outer_list)-decrement else outer_list[i][0] for i in range(len(outer_list))])
             
-            
-            # return right values if recombination!
             return recomb_resulting_data_bits, recomb_pauses, fixed_recomb_sample_positions
                 
         fixed_bit_sample_positions = []
