@@ -517,7 +517,7 @@ class ProtocolAnalyzer(object):
                     new_packet1.extend(data_bits_j[data_bits_up_until:])
                     new_packet2.extend(data_bits_i[data_bits_up_until:])
                     
-                    if new_packet1 not in recomb_resulting_data_bits:
+                    if new_packet1 not in recomb_resulting_data_bits and new_packet1 not in resulting_data_bits:
                         recomb_total_samples += (len(new_packet1)  / bits_per_symbol) * samples_per_symbol
                         recomb_total_samples = int(recomb_total_samples)
                         
@@ -541,7 +541,7 @@ class ProtocolAnalyzer(object):
                         recomb_total_samples += num_pause_samples
                     
                         
-                    if new_packet2 not in recomb_resulting_data_bits:
+                    if new_packet2 not in recomb_resulting_data_bits and new_packet2 not in resulting_data_bits:
                         recomb_total_samples += (len(new_packet2)  / bits_per_symbol) * samples_per_symbol
                         recomb_total_samples = int(recomb_total_samples)
                         
