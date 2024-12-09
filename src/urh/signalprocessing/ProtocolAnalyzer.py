@@ -506,19 +506,29 @@ class ProtocolAnalyzer(object):
             
             ignore_last = 1 if there_was_data else 0
             
-            for i in range(1, len(resulting_data_bits)-ignore_last): # ignore last item in resulting_data_bits cuz its an edge case
-                for j in range(0, i): 
-                    data_bits_i: array.array = resulting_data_bits[i][:]
-                    data_bits_j: array.array = resulting_data_bits[j][:]
+            unique_beginnings = {}
+            unique_endings = {}
+            
+            for i in range(0, len(resulting_data_bits)-ignore_last):
+                beginning = tuple(resulting_data_bits[i][:data_bits_up_until])
+                ending = tuple(resulting_data_bits[i][data_bits_up_until:])
+                
+                if beginning not in unique_beginnings:
+                    unique_beginnings[beginning] = i
                     
-                    new_packet1 = data_bits_i[:data_bits_up_until]
-                    new_packet2 = data_bits_j[:data_bits_up_until]
+                if ending not in unique_endings:
+                    unique_endings[ending] = i
                     
-                    new_packet1.extend(data_bits_j[data_bits_up_until:])
-                    new_packet2.extend(data_bits_i[data_bits_up_until:])
-                    
-                    if new_packet1 not in recomb_resulting_data_bits and new_packet1 not in resulting_data_bits:
-                        recomb_total_samples += (len(new_packet1)  / bits_per_symbol) * samples_per_symbol
+            for beginning, i in unique_beginnings.items():
+                for ending, j in unique_endings.items():
+                    if not i == j:
+                        new_packet = array.array('b', beginning)
+                        new_packet.extend(array.array('b', ending))
+                        
+                        if new_packet in resulting_data_bits:
+                            continue
+                        
+                        recomb_total_samples += (len(new_packet)  / bits_per_symbol) * samples_per_symbol
                         recomb_total_samples = int(recomb_total_samples)
                         
                         bit_sampl_pos_i_copy = self.domino_decrement_then_update(bit_sample_positions[i], recomb_total_samples)
@@ -534,32 +544,8 @@ class ProtocolAnalyzer(object):
                             recomb_sampl_pos_copy[-1] = [recomb_total_samples + num_pause_samples, recomb_total_samples + num_pause_samples]
                             
                             recomb_sample_positions.append(recomb_sampl_pos_copy)
-                            
-                        recomb_resulting_data_bits.append(new_packet1)
-                        recomb_pauses.append(num_pause_samples) # this num_samples is the number of PAUSE samples
-                        
-                        recomb_total_samples += num_pause_samples
-                    
-                        
-                    if new_packet2 not in recomb_resulting_data_bits and new_packet2 not in resulting_data_bits:
-                        recomb_total_samples += (len(new_packet2)  / bits_per_symbol) * samples_per_symbol
-                        recomb_total_samples = int(recomb_total_samples)
-                        
-                        bit_sampl_pos_i_copy = self.domino_decrement_then_update(bit_sample_positions[i], recomb_total_samples)
-                        
-                        if write_bit_sample_pos:
-                            bit_sampl_pos_j_copy: list = self.domino_decrement_then_update(bit_sample_positions[j], recomb_total_samples)
-                            
-                            # then swap first part of pos with existing one
-                            recomb_sampl_pos_copy = bit_sampl_pos_j_copy[:data_bits_up_until]
-                            recomb_sampl_pos_copy.extend(bit_sampl_pos_i_copy[data_bits_up_until:])
-                            
-                            recomb_sampl_pos_copy[-2] = [recomb_total_samples, recomb_total_samples]
-                            recomb_sampl_pos_copy[-1] = [recomb_total_samples + num_pause_samples, recomb_total_samples + num_pause_samples]
-                            
-                            recomb_sample_positions.append(recomb_sampl_pos_copy)
-                            
-                        recomb_resulting_data_bits.append(new_packet2)
+                                
+                        recomb_resulting_data_bits.append(new_packet)
                         recomb_pauses.append(num_pause_samples) # this num_samples is the number of PAUSE samples
                         
                         recomb_total_samples += num_pause_samples
